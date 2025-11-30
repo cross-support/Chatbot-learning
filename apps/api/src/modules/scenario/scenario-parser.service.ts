@@ -65,10 +65,10 @@ export class ScenarioParserService {
           // 既存のノードを確認
           let nodeId = nodeMap.get(nodeKey);
 
-          if (!nodeId) {
+          if (nodeId === undefined) {
             // 新規ノードを作成
             try {
-              const node = await this.prisma.scenarioNode.create({
+              const createdNode: { id: number } = await this.prisma.scenarioNode.create({
                 data: {
                   parentId: currentParentId,
                   level,
@@ -79,8 +79,8 @@ export class ScenarioParserService {
                   order: imported,
                 },
               });
-              nodeId = node.id;
-              nodeMap.set(nodeKey, nodeId);
+              nodeId = createdNode.id;
+              nodeMap.set(nodeKey, createdNode.id);
               imported++;
             } catch (error) {
               errors.push(`行 ${rowIndex + 1}: ノード作成エラー - ${error}`);
@@ -88,7 +88,7 @@ export class ScenarioParserService {
             }
           }
 
-          currentParentId = nodeId;
+          currentParentId = nodeId ?? null;
         }
       }
 
@@ -187,8 +187,13 @@ export class ScenarioParserService {
     rows.push(header);
 
     // ツリー構造を構築
-    const nodeMap = new Map<number, typeof nodes[0] & { children: typeof nodes }>();
-    const rootNodes: (typeof nodes[0] & { children: typeof nodes })[] = [];
+    type NodeType = typeof nodes[0];
+    interface NodeWithChildren extends NodeType {
+      children: NodeWithChildren[];
+    }
+
+    const nodeMap = new Map<number, NodeWithChildren>();
+    const rootNodes: NodeWithChildren[] = [];
 
     nodes.forEach((node) => {
       nodeMap.set(node.id, { ...node, children: [] });
@@ -207,7 +212,7 @@ export class ScenarioParserService {
     });
 
     // 再帰的にCSV行を生成
-    const generateRows = (node: typeof rootNodes[0], path: string[]) => {
+    const generateRows = (node: NodeWithChildren, path: string[]): void => {
       const cellText = this.formatCellForExport(node);
       const newPath = [...path, cellText];
 
@@ -235,7 +240,7 @@ export class ScenarioParserService {
   /**
    * エクスポート用にセルをフォーマット
    */
-  private formatCellForExport(node: typeof Prisma.ScenarioNodeGetPayload<{}>): string {
+  private formatCellForExport(node: { triggerText: string; action: ScenarioAction | null; actionValue: string | null }): string {
     let text = node.triggerText;
 
     if (node.action === 'LINK' && node.actionValue) {
@@ -249,6 +254,3 @@ export class ScenarioParserService {
     return text;
   }
 }
-
-// Prisma型のインポート用
-import { Prisma } from '@prisma/client';

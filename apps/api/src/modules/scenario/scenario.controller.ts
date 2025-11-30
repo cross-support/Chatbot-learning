@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, UseInterc
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { Response } from 'express';
-import { ScenarioService } from './scenario.service';
+import { ScenarioService, ScenarioResponse } from './scenario.service';
 import { ScenarioParserService } from './scenario-parser.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
@@ -22,7 +22,7 @@ export class ScenarioController {
 
   @Get('initial')
   @ApiOperation({ summary: '初期選択肢取得' })
-  async getInitialOptions() {
+  async getInitialOptions(): Promise<ScenarioResponse> {
     return this.scenarioService.getInitialOptions();
   }
 

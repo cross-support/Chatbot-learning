@@ -10,7 +10,7 @@ export class ConversationService {
     return this.prisma.conversation.create({
       data: {
         userId,
-        metadata,
+        metadata: metadata as object | undefined,
         status: 'BOT',
       },
       include: {

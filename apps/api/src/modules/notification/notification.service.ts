@@ -3,17 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 
-interface ConversationWithUser {
+export interface ConversationWithUser {
   id: string;
   user: {
     id: string;
-    name?: string;
-    email?: string;
+    name?: string | null;
+    email?: string | null;
   };
-  metadata?: {
-    url?: string;
-    title?: string;
-  };
+  metadata?: unknown;
 }
 
 @Injectable()
@@ -55,7 +52,7 @@ export class NotificationService {
     const adminUrl = this.configService.get<string>('ADMIN_URL') || 'http://localhost:5173';
     const chatUrl = `${adminUrl}/chat/${conversation.id}`;
 
-    const metadata = conversation.metadata || {};
+    const metadata = (conversation.metadata || {}) as { url?: string; title?: string };
     const userName = conversation.user?.name || '未設定';
     const currentPage = metadata.title || metadata.url || '不明';
 

@@ -83,8 +83,8 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, message]);
     });
 
-    socket.on(WS_EVENTS.TYPING_INDICATOR, (data: { isTyping: boolean; senderType: string }) => {
-      // タイピングインジケーター処理
+    socket.on(WS_EVENTS.TYPING_INDICATOR, (_data: { isTyping: boolean; senderType: string }) => {
+      // タイピングインジケーター処理（将来の実装用）
     });
 
     return () => {

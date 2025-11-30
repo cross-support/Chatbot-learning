@@ -38,11 +38,6 @@ export function ChatTimeline({ messages, isTyping }: ChatTimelineProps) {
     }
   };
 
-  const formatTime = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-  };
-
   return (
     <div class="widget-timeline" ref={timelineRef}>
       {messages.map((message) => (

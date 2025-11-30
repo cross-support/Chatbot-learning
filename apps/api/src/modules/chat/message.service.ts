@@ -21,7 +21,7 @@ export class MessageService {
         senderType: dto.senderType as SenderType,
         contentType: dto.contentType as ContentType,
         content: dto.content,
-        payload: dto.payload || {},
+        payload: (dto.payload || {}) as object,
       },
     });
   }

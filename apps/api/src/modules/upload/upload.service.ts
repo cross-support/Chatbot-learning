@@ -28,7 +28,7 @@ export class UploadService {
     fileSize: number,
   ): Promise<{ uploadUrl: string; fileKey: string; isLocal: boolean }> {
     // バリデーション
-    if (!CONFIG.IMAGE.ALLOWED_TYPES.includes(contentType)) {
+    if (!CONFIG.IMAGE.ALLOWED_TYPES.includes(contentType as typeof CONFIG.IMAGE.ALLOWED_TYPES[number])) {
       throw new BadRequestException('対応していないファイル形式です');
     }
 

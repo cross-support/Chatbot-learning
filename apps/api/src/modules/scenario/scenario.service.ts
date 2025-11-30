@@ -2,12 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MESSAGES } from '@crossbot/shared';
 
-interface ScenarioOption {
+export interface ScenarioOption {
   nodeId: number;
   label: string;
 }
 
-interface ScenarioResponse {
+export interface ScenarioResponse {
   message: string;
   options: ScenarioOption[];
   action?: string;

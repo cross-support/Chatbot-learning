@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { io, Socket } from 'socket.io-client';
-import { WS_EVENTS, MESSAGES } from '@crossbot/shared';
+import { WS_EVENTS } from '@crossbot/shared';
 import { ChatHeader } from './ChatHeader';
 import { ChatTimeline } from './ChatTimeline';
 import { ChatOptions } from './ChatOptions';
