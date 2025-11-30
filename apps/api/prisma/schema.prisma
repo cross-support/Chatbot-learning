@@ -1,0 +1,193 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ユーザー関連 ====================
+
+model User {
+  id            String         @id @default(uuid())
+  sessionId     String         @unique
+  name          String?
+  email         String?
+  phone         String?
+  company       String?
+  lmsUserId     String?        // LMS連携用ID
+  metadata      Json?          // ブラウザ、OS、IP等
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  conversations Conversation[]
+  visitLogs     VisitLog[]
+
+  @@index([sessionId])
+  @@index([lmsUserId])
+}
+
+model Admin {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  role          AdminRole      @default(OPERATOR)
+  status        AdminStatus    @default(OFFLINE)
+  maxConcurrent Int            @default(5)  // 同時対応上限
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  conversations Conversation[]
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  OPERATOR
+}
+
+enum AdminStatus {
+  ONLINE
+  BUSY
+  AWAY
+  OFFLINE
+}
+
+// ==================== チャット関連 ====================
+
+model Conversation {
+  id              String             @id @default(uuid())
+  userId          String
+  user            User               @relation(fields: [userId], references: [id])
+  assignedAdminId String?
+  admin           Admin?             @relation(fields: [assignedAdminId], references: [id])
+  status          ConversationStatus @default(BOT)
+  channel         String             @default("web")
+  metadata        Json?              // 開始時のページURL等
+  startedAt       DateTime           @default(now())
+  closedAt        DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  messages        Message[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([assignedAdminId])
+}
+
+enum ConversationStatus {
+  BOT      // 自動応答中
+  WAITING  // オペレーター待ち
+  HUMAN    // 有人対応中
+  CLOSED   // 終了
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType     SenderType
+  contentType    ContentType
+  content        String      // テキスト本文 or 選択肢ラベル
+  payload        Json?       // 画像URL、メタデータ等
+  isRead         Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+enum SenderType {
+  USER
+  ADMIN
+  BOT
+  SYSTEM
+}
+
+enum ContentType {
+  TEXT
+  IMAGE
+  OPTION_SELECT  // ユーザーが選択肢を選んだ
+  OPTION_PROMPT  // ボットが選択肢を提示
+  LINK
+  FORM
+  INTERNAL_MEMO  // 内部メモ（ユーザー非表示）
+}
+
+// ==================== シナリオ関連 ====================
+
+model ScenarioNode {
+  id           Int            @id @default(autoincrement())
+  parentId     Int?
+  parent       ScenarioNode?  @relation("ScenarioTree", fields: [parentId], references: [id])
+  children     ScenarioNode[] @relation("ScenarioTree")
+  level        Int
+  triggerText  String         // この選択肢のラベル
+  responseText String?        // ボットの応答メッセージ
+  action       ScenarioAction?
+  actionValue  String?        // リンクURL等
+  order        Int            @default(0)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([parentId])
+  @@index([level])
+}
+
+enum ScenarioAction {
+  HANDOVER  // オペレーター切り替え
+  LINK      // 外部リンク
+  FORM      // フォーム入力
+  RESTART   // はじめに戻る
+  DROP_OFF  // 離脱（統計用）
+}
+
+// ==================== テンプレート ====================
+
+model Template {
+  id        String   @id @default(uuid())
+  code      String   @unique  // crosslink01, crosslink02...
+  name      String
+  content   String
+  category  String?
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([category])
+}
+
+// ==================== 行動ログ ====================
+
+model VisitLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url       String
+  pageTitle String?
+  referrer  String?
+  duration  Int?     // 滞在秒数
+  visitedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([visitedAt])
+}
+
+// ==================== 通知設定 ====================
+
+model NotificationConfig {
+  id           String   @id @default(uuid())
+  type         String   // slack, email
+  isEnabled    Boolean  @default(true)
+  config       Json     // webhookUrl, channel等
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
