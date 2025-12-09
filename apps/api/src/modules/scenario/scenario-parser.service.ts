@@ -146,6 +146,36 @@ export class ScenarioParserService {
       };
     }
 
+    // [jump]ノード名 パターン（別ノードへジャンプ）
+    const jumpMatch = cell.match(/(.+?)\[jump\](.+)/i);
+    if (jumpMatch) {
+      return {
+        text: jumpMatch[1].trim(),
+        action: 'JUMP',
+        actionValue: jumpMatch[2].trim(),
+      };
+    }
+
+    // [mail]設定 パターン（メール送信）
+    const mailMatch = cell.match(/(.+?)\[mail\](.+)/i);
+    if (mailMatch) {
+      return {
+        text: mailMatch[1].trim(),
+        action: 'MAIL',
+        actionValue: mailMatch[2].trim(),
+      };
+    }
+
+    // [csv]データ パターン（CSV出力用マーカー）
+    const csvMatch = cell.match(/(.+?)\[csv\](.+)/i);
+    if (csvMatch) {
+      return {
+        text: csvMatch[1].trim(),
+        action: 'CSV',
+        actionValue: csvMatch[2].trim(),
+      };
+    }
+
     return { text: cell.trim() };
   }
 
@@ -164,10 +194,22 @@ export class ScenarioParserService {
       return `${parsed.text}の詳細については、以下のリンクをご確認ください。`;
     }
     if (parsed.action === 'HANDOVER') {
-      return '担当者にお繋ぎします。少々お待ちください。';
+      return '担当者にお繋ぎします。ご質問内容を送信後、少々お待ちください。';
     }
     if (parsed.action === 'FORM') {
       return 'こちらのフォームに必要事項をご入力ください。';
+    }
+    if (parsed.action === 'JUMP') {
+      return undefined; // JUMPは別ノードに遷移するためレスポンス不要
+    }
+    if (parsed.action === 'MAIL') {
+      return 'メール送信を実行します。';
+    }
+    if (parsed.action === 'CSV') {
+      return undefined; // CSVは内部処理用
+    }
+    if (parsed.action === 'DROP_OFF') {
+      return undefined; // 離脱ポイントは統計用
     }
     return undefined;
   }
@@ -249,6 +291,16 @@ export class ScenarioParserService {
       text = `${text}[handover]`;
     } else if (node.action === 'FORM' && node.actionValue) {
       text = `${text}[form]${node.actionValue}`;
+    } else if (node.action === 'JUMP' && node.actionValue) {
+      text = `${text}[jump]${node.actionValue}`;
+    } else if (node.action === 'MAIL' && node.actionValue) {
+      text = `${text}[mail]${node.actionValue}`;
+    } else if (node.action === 'CSV' && node.actionValue) {
+      text = `${text}[csv]${node.actionValue}`;
+    } else if (node.action === 'DROP_OFF') {
+      text = `${text}[drop_off]`;
+    } else if (node.action === 'RESTART') {
+      text = `${text}[restart]`;
     }
 
     return text;

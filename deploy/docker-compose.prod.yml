@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # PostgreSQL データベース
+  postgres:
+    image: postgres:15-alpine
+    container_name: crossbot-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-crossbot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-crossbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - crossbot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crossbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NestJS API サーバー
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: crossbot-api
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-crossbot}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-crossbot}
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crossbot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 管理画面 (静的ファイル配信)
+  admin:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.admin
+    container_name: crossbot-admin
+    restart: always
+    ports:
+      - "5173:80"
+    networks:
+      - crossbot-network
+
+  # チャットウィジェット (静的ファイル配信)
+  widget:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.widget
+    container_name: crossbot-widget
+    restart: always
+    ports:
+      - "5174:80"
+    networks:
+      - crossbot-network
+
+volumes:
+  postgres_data:
+
+networks:
+  crossbot-network:
+    driver: bridge

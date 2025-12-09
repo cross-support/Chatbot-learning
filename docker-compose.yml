@@ -1,0 +1,66 @@
+# =====================================================
+# CrossBot - 開発環境用 Docker Compose
+# =====================================================
+# 使い方:
+#   docker compose up -d        # 起動
+#   docker compose down         # 停止
+#   docker compose logs -f api  # APIログを確認
+# =====================================================
+
+services:
+  # PostgreSQL データベース
+  postgres:
+    image: postgres:15-alpine
+    container_name: crossbot-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crossbot
+      POSTGRES_PASSWORD: crossbot_dev
+      POSTGRES_DB: crossbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - crossbot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crossbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin (データベース管理ツール) - オプション
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: crossbot-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@crossbot.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_CHECK_EMAIL_DELIVERABILITY: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - crossbot-network
+
+  # MailHog (メール確認用) - オプション
+  # 注: docker-testと競合する場合はコメントアウトして使用
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: crossbot-mailhog
+    restart: unless-stopped
+    ports:
+      - "1026:1025"  # SMTP (1025は別プロジェクトで使用中)
+      - "8026:8025"  # Web UI (8025は別プロジェクトで使用中)
+    networks:
+      - crossbot-network
+
+volumes:
+  postgres_data:
+
+networks:
+  crossbot-network:
+    driver: bridge

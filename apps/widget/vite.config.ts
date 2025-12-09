@@ -1,8 +1,14 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
+import path from 'path';
 
 export default defineConfig({
   plugins: [preact()],
+  resolve: {
+    alias: {
+      '@crossbot/shared': path.resolve(__dirname, '../../packages/shared/src'),
+    },
+  },
   build: {
     lib: {
       entry: 'src/main.tsx',

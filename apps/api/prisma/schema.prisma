@@ -9,10 +9,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==================== アプリケーション（マルチテナント） ====================
+
+model Application {
+  id            String   @id @default(uuid())
+  name          String   // アプリケーション名
+  siteId        String   @unique // ウィジェット識別用ID（APIキー的な役割）
+  domain        String?  // 許可ドメイン
+  description   String?
+  isActive      Boolean  @default(true)
+  settings      Json?    // アプリ固有設定
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // リレーション
+  users         User[]
+  conversations Conversation[]
+  scenarios     Scenario[]
+  templates     Template[]
+  admins        AdminApplicationAccess[]
+  chatSettings  ChatSettings[]
+  notificationConfigs NotificationConfig[]
+
+  @@index([siteId])
+  @@index([isActive])
+}
+
+// 管理者とアプリケーションの多対多リレーション
+model AdminApplicationAccess {
+  id            String      @id @default(uuid())
+  adminId       String
+  admin         Admin       @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  role          String      @default("operator") // owner, admin, operator
+  createdAt     DateTime    @default(now())
+
+  @@unique([adminId, applicationId])
+  @@index([adminId])
+  @@index([applicationId])
+}
+
 // ==================== ユーザー関連 ====================
 
 model User {
   id            String         @id @default(uuid())
+  applicationId String?        // マルチテナント用
+  application   Application?   @relation(fields: [applicationId], references: [id])
   sessionId     String         @unique
   name          String?
   email         String?
@@ -26,22 +69,43 @@ model User {
   conversations Conversation[]
   visitLogs     VisitLog[]
 
+  @@index([applicationId])
   @@index([sessionId])
   @@index([lmsUserId])
 }
 
 model Admin {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  passwordHash  String
-  name          String
-  role          AdminRole      @default(OPERATOR)
-  status        AdminStatus    @default(OFFLINE)
-  maxConcurrent Int            @default(5)  // 同時対応上限
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id                   String         @id @default(uuid())
+  email                String         @unique
+  passwordHash         String
+  name                 String
+  role                 AdminRole      @default(OPERATOR)
+  status               AdminStatus    @default(OFFLINE)
+  maxConcurrent        Int            @default(5)  // 同時対応上限
+  // パスワードポリシー関連
+  loginAttempts        Int            @default(0)  // ログイン失敗回数
+  isLocked             Boolean        @default(false)  // アカウントロック
+  lockedUntil          DateTime?      // ロック解除日時
+  lastPasswordChangeAt DateTime?      // 最終パスワード変更日時
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   conversations Conversation[]
+  applicationAccess AdminApplicationAccess[]
+}
+
+model PasswordPolicy {
+  id                    String   @id @default(uuid())
+  minLength             Int      @default(8)      // 最小文字数
+  requireUppercase      Boolean  @default(true)   // 大文字必須
+  requireLowercase      Boolean  @default(true)   // 小文字必須
+  requireNumbers        Boolean  @default(true)   // 数字必須
+  requireSpecialChars   Boolean  @default(false)  // 特殊文字必須
+  maxLoginAttempts      Int      @default(5)      // 最大ログイン失敗回数
+  lockoutDurationMinutes Int     @default(30)     // ロック時間（分）
+  passwordExpiryDays    Int      @default(90)     // パスワード有効期限（日）
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 enum AdminRole {
@@ -61,6 +125,8 @@ enum AdminStatus {
 
 model Conversation {
   id              String             @id @default(uuid())
+  applicationId   String?            // マルチテナント用
+  application     Application?       @relation(fields: [applicationId], references: [id])
   userId          String
   user            User               @relation(fields: [userId], references: [id])
   assignedAdminId String?
@@ -68,6 +134,7 @@ model Conversation {
   status          ConversationStatus @default(BOT)
   channel         String             @default("web")
   metadata        Json?              // 開始時のページURL等
+  isStarred       Boolean            @default(false)  // スター付き
   startedAt       DateTime           @default(now())
   closedAt        DateTime?
   createdAt       DateTime           @default(now())
@@ -75,6 +142,7 @@ model Conversation {
 
   messages        Message[]
 
+  @@index([applicationId])
   @@index([userId])
   @@index([status])
   @@index([assignedAdminId])
@@ -112,6 +180,7 @@ enum SenderType {
 enum ContentType {
   TEXT
   IMAGE
+  FILE           // ファイル添付
   OPTION_SELECT  // ユーザーが選択肢を選んだ
   OPTION_PROMPT  // ボットが選択肢を提示
   LINK
@@ -121,46 +190,82 @@ enum ContentType {
 
 // ==================== シナリオ関連 ====================
 
-model ScenarioNode {
-  id           Int            @id @default(autoincrement())
-  parentId     Int?
-  parent       ScenarioNode?  @relation("ScenarioTree", fields: [parentId], references: [id])
-  children     ScenarioNode[] @relation("ScenarioTree")
-  level        Int
-  triggerText  String         // この選択肢のラベル
-  responseText String?        // ボットの応答メッセージ
-  action       ScenarioAction?
-  actionValue  String?        // リンクURL等
-  order        Int            @default(0)
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+model Scenario {
+  id            String         @id @default(uuid())
+  applicationId String?        // マルチテナント用
+  application   Application?   @relation(fields: [applicationId], references: [id])
+  name          String
+  description   String?
+  version       Int            @default(1)
+  isActive      Boolean        @default(true)
+  targetRole    String?        // "learner", "group_admin", "global_admin" - null=全員対象
+  sourceType    String?        // "eva", "csv", "manual"
+  sourceData    Json?          // 元データのバックアップ
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
+  nodes         ScenarioNode[]
+
+  @@index([applicationId])
+  @@index([targetRole])
+  @@index([isActive, targetRole])
+}
+
+model ScenarioNode {
+  id             Int            @id @default(autoincrement())
+  scenarioId     String?
+  scenario       Scenario?      @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  parentId       Int?
+  parent         ScenarioNode?  @relation("ScenarioTree", fields: [parentId], references: [id])
+  children       ScenarioNode[] @relation("ScenarioTree")
+  externalId     String?        // EVA等の元ID
+  nodeType       String?        // dialogue.response, dialogue.joint, system.* 等
+  level          Int
+  triggerText    String         // この選択肢のラベル
+  responseText   String?        // ボットの応答メッセージ
+  responseAdvanced Json?        // 複数応答、HTML、フォーム等
+  action         ScenarioAction?
+  actionValue    String?        // リンクURL等
+  actionConfig   Json?          // メール設定、CSV設定等
+  nodeName       String?        // ノード名（管理用）
+  order          Int            @default(0)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([scenarioId, externalId])
   @@index([parentId])
   @@index([level])
+  @@index([externalId])
 }
 
 enum ScenarioAction {
-  HANDOVER  // オペレーター切り替え
-  LINK      // 外部リンク
-  FORM      // フォーム入力
-  RESTART   // はじめに戻る
-  DROP_OFF  // 離脱（統計用）
+  HANDOVER    // オペレーター切り替え
+  LINK        // 外部リンク
+  FORM        // フォーム入力
+  RESTART     // はじめに戻る
+  DROP_OFF    // 離脱（統計用）
+  MAIL        // メール送信
+  CSV         // CSV出力
+  JUMP        // 別ノードへジャンプ
 }
 
 // ==================== テンプレート ====================
 
 model Template {
-  id        String   @id @default(uuid())
-  code      String   @unique  // crosslink01, crosslink02...
-  name      String
-  content   String
-  category  String?
-  order     Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String       @id @default(uuid())
+  applicationId String?      // マルチテナント用
+  application   Application? @relation(fields: [applicationId], references: [id])
+  code          String       @unique  // crosslink01, crosslink02...
+  name          String
+  content       String
+  category      String?
+  order         Int          @default(0)
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
+  @@index([applicationId])
   @@index([code])
   @@index([category])
 }
@@ -184,10 +289,743 @@ model VisitLog {
 // ==================== 通知設定 ====================
 
 model NotificationConfig {
+  id            String       @id @default(uuid())
+  applicationId String?      // マルチテナント用
+  application   Application? @relation(fields: [applicationId], references: [id])
+  type          String       // slack, email
+  isEnabled     Boolean      @default(true)
+  config        Json         // webhookUrl, channel等
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([applicationId])
+}
+
+// ==================== チャット設定 ====================
+
+model ChatSettings {
+  id            String       @id @default(uuid())
+  applicationId String?      // マルチテナント用
+  application   Application? @relation(fields: [applicationId], references: [id])
+  key           String       // 設定キー（例: business_hours, welcome_message）
+  value         Json         // 設定値
+  description   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([applicationId, key])  // アプリ内でキーはユニーク
+  @@index([applicationId])
+}
+
+// ==================== 時間外問い合わせ ====================
+
+model OffHoursInquiry {
+  id            String            @id @default(uuid())
+  name          String            // 受講者氏名
+  email         String            // メールアドレス
+  company       String?           // 派遣会社
+  content       String            // 問い合わせ内容
+  status        InquiryStatus     @default(PENDING)  // 対応状況
+  assignedAdminId String?
+  note          String?           // 管理者メモ
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  resolvedAt    DateTime?         // 対応完了日時
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum InquiryStatus {
+  PENDING     // 未対応
+  IN_PROGRESS // 対応中
+  RESOLVED    // 対応完了
+}
+
+// ==================== APIキー/Webhook管理 ====================
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String    // キー名
+  key         String    @unique  // APIキー本体（ハッシュ化）
+  keyPrefix   String    // 表示用プレフィックス（例: cb_xxx...）
+  permissions Json?     // 権限設定
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([key])
+}
+
+model Webhook {
+  id          String        @id @default(uuid())
+  name        String        // Webhook名
+  url         String        // エンドポイントURL
+  events      String[]      // 対象イベント（例: conversation.created, message.received）
+  secret      String?       // 署名用シークレット
+  isActive    Boolean       @default(true)
+  lastTriggeredAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+// ==================== ユーザーラベル ====================
+
+model UserLabel {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("#3B82F6")  // デフォルト青
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     UserLabelAssignment[]
+}
+
+model UserLabelAssignment {
+  id        String    @id @default(uuid())
+  userId    String
+  labelId   String
+  label     UserLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, labelId])
+  @@index([userId])
+  @@index([labelId])
+}
+
+// ==================== 管理者セッション ====================
+
+model AdminSession {
   id           String   @id @default(uuid())
-  type         String   // slack, email
-  isEnabled    Boolean  @default(true)
-  config       Json     // webhookUrl, channel等
+  adminId      String
+  token        String   @unique  // JWTトークンのハッシュ
+  ipAddress    String?
+  userAgent    String?
+  deviceInfo   String?  // デバイス情報（ブラウザ、OS等）
+  lastActiveAt DateTime @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([adminId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// ==================== セキュリティログ ====================
+
+model SecurityLog {
+  id          String   @id @default(uuid())
+  type        String   // login_success, login_failure, logout, password_change, etc.
+  adminId     String?
+  ipAddress   String?
+  userAgent   String?
+  details     Json?    // 追加情報
+  createdAt   DateTime @default(now())
+
+  @@index([type])
+  @@index([adminId])
+  @@index([createdAt])
+}
+
+// ==================== Webhookイベントログ ====================
+
+model WebhookEventLog {
+  id           String            @id @default(uuid())
+  webhookId    String
+  event        String            // イベントタイプ
+  payload      Json              // 送信したペイロード
+  status       WebhookLogStatus  @default(PENDING)
+  attempts     Int               @default(0)
+  maxAttempts  Int               @default(5)
+  nextRetryAt  DateTime?
+  lastError    String?
+  responseCode Int?
+  responseBody String?
+  sentAt       DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([nextRetryAt])
+  @@index([createdAt])
+}
+
+enum WebhookLogStatus {
+  PENDING     // 送信待ち
+  SUCCESS     // 成功
+  FAILED      // 失敗（リトライ中）
+  EXHAUSTED   // リトライ上限到達
+}
+
+// ==================== 監査ログ ====================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  adminId     String?
+  adminEmail  String?
+  action      String   // create, update, delete, login, logout, etc.
+  entity      String   // conversation, message, user, template, etc.
+  entityId    String?
+  oldValue    Json?    // 変更前の値
+  newValue    Json?    // 変更後の値
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+}
+
+// ==================== アラート設定 ====================
+
+model AlertConfig {
+  id              String   @id @default(uuid())
+  name            String
+  type            String   // error_rate, response_time, queue_size, etc.
+  condition       Json     // 発火条件（threshold, operator, etc.）
+  channels        String[] // slack, email
+  channelConfig   Json?    // webhook URL, email addresses
+  isEnabled       Boolean  @default(true)
+  cooldownMinutes Int      @default(30)  // 再通知までの時間
+  lastTriggeredAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AlertHistory {
+  id          String   @id @default(uuid())
+  alertId     String
+  message     String
+  value       Float?   // 発火時の値
+  notifiedVia String[] // 通知先
+  createdAt   DateTime @default(now())
+
+  @@index([alertId])
+  @@index([createdAt])
+}
+
+// ==================== データ保持ポリシー ====================
+
+model DataRetentionPolicy {
+  id             String   @id @default(uuid())
+  entity         String   @unique // messages, visit_logs, audit_logs, etc.
+  retentionDays  Int      // 保持日数
+  isEnabled      Boolean  @default(true)
+  lastExecutedAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ==================== ファイル添付 ====================
+
+model Attachment {
+  id           String   @id @default(uuid())
+  messageId    String?
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  storageUrl   String   // ファイルの保存パス
+  createdAt    DateTime @default(now())
+
+  @@index([messageId])
+}
+
+// ==================== 顧客満足度調査 ====================
+
+model SatisfactionSurvey {
+  id             String   @id @default(uuid())
+  conversationId String   @unique
+  rating         Int      // 1-5
+  feedback       String?  // 自由記述
+  categories     String[] // 改善点のカテゴリ
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([rating])
+  @@index([createdAt])
+}
+
+// ==================== AIインサイト ====================
+
+model ConversationInsight {
+  id             String   @id @default(uuid())
+  conversationId String   @unique
+  sentiment      String?  // positive, neutral, negative
+  topics         String[] // 抽出されたトピック
+  intent         String?  // 問い合わせの意図
+  summary        String?  // 会話要約
+  suggestions    Json?    // 改善提案
+  analyzedAt     DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([sentiment])
+}
+
+model FAQSuggestion {
+  id          String   @id @default(uuid())
+  question    String
+  answer      String?
+  frequency   Int      @default(1)
+  isApproved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([frequency])
+}
+
+// ==================== 2要素認証（2FA） ====================
+
+model TwoFactorAuth {
+  id           String   @id @default(uuid())
+  adminId      String   @unique
+  secret       String   // TOTP秘密鍵（暗号化）
+  backupCodes  String[] // バックアップコード（ハッシュ化）
+  isEnabled    Boolean  @default(false)
+  verifiedAt   DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([adminId])
+}
+
+// ==================== IPホワイトリスト ====================
+
+model IpWhitelist {
+  id          String   @id @default(uuid())
+  ipAddress   String   // 単一IPまたはCIDR表記
+  description String?
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([ipAddress])
+}
+
+model IpAccessLog {
+  id          String   @id @default(uuid())
+  ipAddress   String
+  adminId     String?
+  allowed     Boolean
+  reason      String?  // blocked, whitelisted, etc.
+  createdAt   DateTime @default(now())
+
+  @@index([ipAddress])
+  @@index([createdAt])
+}
+
+// ==================== 自動割り当て ====================
+
+model AssignmentRule {
+  id          String   @id @default(uuid())
+  name        String
+  priority    Int      @default(0)
+  conditions  Json     // 条件（スキル、言語、時間帯等）
+  targetType  String   // admin, team, round_robin
+  targetId    String?  // 特定の管理者/チームID
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([priority])
+}
+
+model AdminSkill {
+  id          String   @id @default(uuid())
+  adminId     String
+  skill       String   // 例: javascript, 営業, 技術サポート
+  level       Int      @default(1) // 1-5
+  createdAt   DateTime @default(now())
+
+  @@unique([adminId, skill])
+  @@index([adminId])
+  @@index([skill])
+}
+
+// ==================== 定型業務自動化（スケジューラー） ====================
+
+model ScheduledTask {
+  id           String   @id @default(uuid())
+  name         String
+  taskType     String   // report, cleanup, notification, etc.
+  cronExpression String // cron形式
+  config       Json?    // タスク固有設定
+  isEnabled    Boolean  @default(true)
+  lastRunAt    DateTime?
+  nextRunAt    DateTime?
+  lastResult   Json?    // 最終実行結果
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model TaskExecutionLog {
+  id          String   @id @default(uuid())
+  taskId      String
+  status      String   // success, failed, skipped
+  startedAt   DateTime
+  finishedAt  DateTime?
+  result      Json?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+// ==================== ボット学習・改善提案 ====================
+
+model ScenarioImprovement {
+  id              String   @id @default(uuid())
+  nodeId          Int?     // 対象ノードID
+  type            String   // add_option, modify_response, add_node
+  suggestion      String
+  confidence      Float    // 信頼度スコア
+  basedOnCount    Int      // 根拠となる会話数
+  status          String   @default("pending") // pending, approved, rejected
+  approvedBy      String?
+  implementedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([nodeId])
+  @@index([status])
+}
+
+model UserQuestion {
+  id             String   @id @default(uuid())
+  conversationId String
+  question       String
+  matchedNodeId  Int?     // マッチしたノード
+  matchScore     Float?   // マッチスコア
+  wasHandedOver  Boolean  @default(false) // オペレーターへ引継ぎ
+  createdAt      DateTime @default(now())
+
+  @@index([matchedNodeId])
+  @@index([createdAt])
+}
+
+// ==================== リッチメッセージ ====================
+
+model RichMessage {
+  id          String   @id @default(uuid())
+  type        String   // carousel, quick_reply, image_map, button
+  name        String
+  content     Json     // メッセージ構造
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+}
+
+// ==================== コブラウズ ====================
+
+model CobrowseSession {
+  id             String   @id @default(uuid())
+  conversationId String
+  adminId        String
+  userId         String
+  status         String   @default("pending") // pending, active, ended
+  sessionCode    String   @unique // 共有用コード
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([sessionCode])
+}
+
+// ==================== マルチチャネル連携 ====================
+
+model ChannelConfig {
+  id           String   @id @default(uuid())
+  channelType  String   @unique // line, slack, teams, facebook
+  isEnabled    Boolean  @default(false)
+  credentials  Json     // 認証情報（暗号化）
+  config       Json?    // チャネル固有設定
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ChannelUser {
+  id             String   @id @default(uuid())
+  channelType    String   // line, slack
+  channelUserId  String   // 各チャネルでのユーザーID
+  userId         String?  // 紐付けされたUserのID
+  displayName    String?
+  profileData    Json?    // プロフィール情報
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([channelType, channelUserId])
+  @@index([userId])
+}
+
+// ==================== 多言語対応（i18n） ====================
+
+model Translation {
+  id          String   @id @default(uuid())
+  locale      String   // ja, en, zh, ko, etc.
+  namespace   String   // common, chat, admin, bot
+  key         String   // 翻訳キー
+  value       String   // 翻訳テキスト
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([locale, namespace, key])
+  @@index([locale])
+  @@index([namespace])
+}
+
+// ==================== 管理者設定 ====================
+
+model AdminPreference {
+  id           String   @id @default(uuid())
+  adminId      String   @unique
+  theme        String   @default("light") // light, dark, system
+  locale       String   @default("ja")
+  shortcuts    Json?    // カスタムショートカット設定
+  dashboardLayout Json? // ダッシュボードウィジェット配置
+  notifications Json?   // 通知設定
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([adminId])
+}
+
+// ==================== 定型文スニペット ====================
+
+model Snippet {
+  id          String   @id @default(uuid())
+  adminId     String?  // null=共有スニペット
+  title       String
+  content     String
+  shortcut    String?  // 呼び出しショートカット（例: /thanks）
+  category    String?
+  usageCount  Int      @default(0)
+  isShared    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([adminId])
+  @@index([shortcut])
+  @@index([category])
+}
+
+// ==================== 会話タグ ====================
+
+model ConversationTag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  color     String   @default("#6B7280")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments ConversationTagAssignment[]
+}
+
+model ConversationTagAssignment {
+  id             String          @id @default(uuid())
+  conversationId String
+  tagId          String
+  tag            ConversationTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  assignedBy     String?
+  createdAt      DateTime        @default(now())
+
+  @@unique([conversationId, tagId])
+  @@index([conversationId])
+  @@index([tagId])
+}
+
+// ==================== オペレーター転送 ====================
+
+model ConversationTransfer {
+  id             String   @id @default(uuid())
+  conversationId String
+  fromAdminId    String
+  toAdminId      String
+  reason         String?
+  note           String?  // 引継ぎメモ
+  status         String   @default("pending") // pending, accepted, rejected
+  createdAt      DateTime @default(now())
+  acceptedAt     DateTime?
+
+  @@index([conversationId])
+  @@index([fromAdminId])
+  @@index([toAdminId])
+}
+
+// ==================== SLA管理 ====================
+
+model SlaPolicy {
+  id                    String   @id @default(uuid())
+  name                  String
+  priority              Int      @default(0)
+  conditions            Json?    // 適用条件
+  firstResponseMinutes  Int      // 初回応答目標（分）
+  resolutionMinutes     Int      // 解決目標（分）
+  escalationMinutes     Int?     // エスカレーション時間
+  escalationTo          String?  // エスカレーション先
+  isEnabled             Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([priority])
+}
+
+model SlaTracking {
+  id                   String    @id @default(uuid())
+  conversationId       String    @unique
+  policyId             String?
+  firstResponseDue     DateTime?
+  firstResponseAt      DateTime?
+  resolutionDue        DateTime?
+  resolvedAt           DateTime?
+  isBreached           Boolean   @default(false)
+  breachType           String?   // first_response, resolution
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([conversationId])
+  @@index([isBreached])
+}
+
+// ==================== カスタムダッシュボード ====================
+
+model DashboardWidget {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   // chart, counter, list, gauge
+  config      Json     // ウィジェット設定
+  dataSource  String   // conversations, messages, surveys, etc.
+  query       Json?    // データ取得クエリ
+  refreshInterval Int  @default(60) // 秒
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+}
+
+// ==================== ユーザーセグメント ====================
+
+model UserSegment {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  conditions  Json     // セグメント条件
+  isAutomatic Boolean  @default(true) // 自動更新
+  userCount   Int      @default(0)
+  lastUpdatedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UserSegmentMembership {
+  id          String   @id @default(uuid())
+  segmentId   String
+  userId      String
+  addedAt     DateTime @default(now())
+
+  @@unique([segmentId, userId])
+  @@index([segmentId])
+  @@index([userId])
+}
+
+// ==================== A/Bテスト ====================
+
+model AbTest {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  nodeId      Int?     // テスト対象ノード
+  status      String   @default("draft") // draft, running, paused, completed
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants    AbTestVariant[]
+
+  @@index([status])
+  @@index([nodeId])
+}
+
+model AbTestVariant {
+  id            String   @id @default(uuid())
+  testId        String
+  test          AbTest   @relation(fields: [testId], references: [id], onDelete: Cascade)
+  name          String   // A, B, C...
+  weight        Int      @default(50) // 配分比率（%）
+  content       Json     // バリアント内容（応答文等）
+  impressions   Int      @default(0)
+  conversions   Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([testId])
+}
+
+model AbTestAssignment {
+  id          String   @id @default(uuid())
+  testId      String
+  variantId   String
+  userId      String
+  converted   Boolean  @default(false)
+  assignedAt  DateTime @default(now())
+  convertedAt DateTime?
+
+  @@unique([testId, userId])
+  @@index([testId])
+  @@index([variantId])
+}
+
+// ==================== プロアクティブチャット ====================
+
+model ProactiveRule {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  triggerType   String   // page_view, time_on_page, scroll_depth, exit_intent, custom
+  triggerConfig Json     // トリガー設定（URL, 秒数, %等）
+  message       String   // 表示するメッセージ
+  messageType   String   @default("text") // text, template, scenario
+  templateId    String?  // テンプレートID（messageType=templateの場合）
+  scenarioNodeId Int?    // シナリオノードID（messageType=scenarioの場合）
+  delay         Int      @default(0)      // 表示遅延（秒）
+  priority      Int      @default(0)      // 優先度（高い順に評価）
+  targetSegmentId String? // 対象セグメントID
+  isEnabled     Boolean  @default(true)
+  showOnce      Boolean  @default(true)   // 一度だけ表示
+  maxShowCount  Int      @default(1)      // 最大表示回数
+  startDate     DateTime?
+  endDate       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  logs          ProactiveLog[]
+
+  @@index([isEnabled])
+  @@index([priority])
+  @@index([triggerType])
+}
+
+model ProactiveLog {
+  id          String   @id @default(uuid())
+  ruleId      String
+  rule        ProactiveRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  userId      String?
+  sessionId   String
+  action      String   // shown, clicked, dismissed, converted
+  metadata    Json?    // ページURL、表示時間等
+  createdAt   DateTime @default(now())
+
+  @@index([ruleId])
+  @@index([sessionId])
+  @@index([action])
+  @@index([createdAt])
 }

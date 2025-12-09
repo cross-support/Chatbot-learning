@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface Admin {
+export interface Admin {
   id: string;
   email: string;
   name: string;
@@ -16,6 +16,7 @@ interface AuthState {
   login: (admin: Admin, token: string) => void;
   logout: () => void;
   updateStatus: (status: string) => void;
+  updateAdmin: (data: Partial<Admin>) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -39,6 +40,10 @@ export const useAuthStore = create<AuthState>()(
       updateStatus: (status) =>
         set((state) => ({
           admin: state.admin ? { ...state.admin, status } : null,
+        })),
+      updateAdmin: (data) =>
+        set((state) => ({
+          admin: state.admin ? { ...state.admin, ...data } : null,
         })),
     }),
     {

@@ -1,25 +1,47 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import * as bodyParser from 'body-parser';
 import { AppModule } from './app.module';
+import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log'],
+  });
+
+  // ボディサイズ制限（シナリオ保存等で必要だが過度に大きくしない）
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
   const configService = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
 
   // Security middleware
-  app.use(helmet());
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // 画像のクロスオリジンアクセスを許可
+  }));
   app.use(cookieParser());
 
   // CORS設定
-  const corsOrigins = configService.get<string>('CORS_ORIGINS')?.split(',') || [];
+  const corsOrigins = configService.get<string>('CORS_ORIGINS')?.split(',').filter(Boolean) || [];
+  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
+
   app.enableCors({
-    origin: corsOrigins,
+    origin: corsOrigins.length > 0
+      ? corsOrigins
+      : nodeEnv === 'production'
+        ? false // 本番環境ではCORS_ORIGINSが必須
+        : true,  // 開発環境のみ全許可
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   });
+
+  // グローバル例外フィルタ
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   // Validation pipe
   app.useGlobalPipes(
@@ -52,15 +74,7 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') || 3000;
   await app.listen(port);
 
-  console.log(`
-  ╔══════════════════════════════════════════════════════╗
-  ║                                                      ║
-  ║   🤖 CrossBot API Server                             ║
-  ║                                                      ║
-  ║   Server running on: http://localhost:${port}          ║
-  ║   Swagger docs: http://localhost:${port}/api/docs      ║
-  ║                                                      ║
-  ╚══════════════════════════════════════════════════════╝
-  `);
+  logger.log(`CrossBot API Server started on http://localhost:${port}`);
+  logger.log(`Swagger docs available at http://localhost:${port}/api/docs`);
 }
 bootstrap();

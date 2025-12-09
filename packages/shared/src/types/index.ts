@@ -14,7 +14,7 @@ export type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'OPERATOR';
 export type AdminStatus = 'ONLINE' | 'BUSY' | 'AWAY' | 'OFFLINE';
 
 // ==================== シナリオアクション ====================
-export type ScenarioAction = 'HANDOVER' | 'LINK' | 'FORM' | 'RESTART' | 'DROP_OFF';
+export type ScenarioAction = 'HANDOVER' | 'LINK' | 'FORM' | 'RESTART' | 'DROP_OFF' | 'MAIL' | 'CSV' | 'JUMP';
 
 // ==================== ユーザー情報 ====================
 export interface User {
@@ -109,6 +109,8 @@ export interface ScenarioNode {
 export interface ScenarioOption {
   nodeId: number;
   label: string;
+  type?: 'go_to' | 'button' | 'link';  // ボタンタイプ
+  linkTarget?: string;                  // リンク先URL
 }
 
 export interface ScenarioResponse {
@@ -145,6 +147,28 @@ export interface LmsUserInfo {
   id: string;
   name: string;
   email?: string;
+  company?: string;
+  department?: string;
   currentCourseId?: string;
+  currentCourseName?: string;
   progress?: number;
+  lastAccessedAt?: Date;
+}
+
+export interface LmsCourseInfo {
+  id: string;
+  name: string;
+  description?: string;
+  totalLessons: number;
+  completedLessons: number;
+  progress: number;
+  status: 'not_started' | 'in_progress' | 'completed';
+}
+
+export interface LmsEventData {
+  lmsUserId: string;
+  eventType: 'course_start' | 'lesson_complete' | 'course_complete' | 'quiz_submit' | 'help_request';
+  courseId?: string;
+  lessonId?: string;
+  metadata?: Record<string, unknown>;
 }

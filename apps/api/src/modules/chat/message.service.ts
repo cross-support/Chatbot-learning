@@ -26,22 +26,57 @@ export class MessageService {
     });
   }
 
-  async findByConversation(conversationId: string, params?: { limit?: number; before?: Date }) {
-    const { limit = 50, before } = params || {};
+  async findByConversation(conversationId: string, params?: { limit?: number; beforeId?: string }) {
+    const { limit = 50, beforeId } = params || {};
 
-    return this.prisma.message.findMany({
+    // beforeIdが指定された場合、そのメッセージより前のメッセージを取得
+    let cursor: { id: string } | undefined;
+    if (beforeId) {
+      cursor = { id: beforeId };
+    }
+
+    const messages = await this.prisma.message.findMany({
       where: {
         conversationId,
-        ...(before && { createdAt: { lt: before } }),
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       take: limit,
+      ...(cursor && {
+        cursor,
+        skip: 1, // カーソル自体はスキップ
+      }),
     });
+
+    // 古い順に並び替えて返す
+    return messages.reverse();
   }
 
-  async markAsRead(messageIds: string[]) {
+  async markAsRead(conversationIdOrMessageIds: string | string[], senderType?: SenderType | string) {
+    // 引数が配列の場合はメッセージIDのリストとして処理（旧APIとの互換性）
+    if (Array.isArray(conversationIdOrMessageIds)) {
+      await this.prisma.message.updateMany({
+        where: { id: { in: conversationIdOrMessageIds } },
+        data: { isRead: true },
+      });
+    } else {
+      // 会話IDとsenderTypeで既読にする
+      await this.prisma.message.updateMany({
+        where: {
+          conversationId: conversationIdOrMessageIds,
+          senderType: senderType as SenderType,
+          isRead: false,
+        },
+        data: { isRead: true },
+      });
+    }
+  }
+
+  async markAllAsRead(conversationId: string) {
     await this.prisma.message.updateMany({
-      where: { id: { in: messageIds } },
+      where: {
+        conversationId,
+        isRead: false,
+      },
       data: { isRead: true },
     });
   }
@@ -52,6 +87,25 @@ export class MessageService {
         conversationId,
         senderType,
         isRead: false,
+      },
+    });
+  }
+
+  async findInternalMemos(conversationId: string) {
+    return this.prisma.message.findMany({
+      where: {
+        conversationId,
+        contentType: 'INTERNAL_MEMO',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async countUserMessages(conversationId: string) {
+    return this.prisma.message.count({
+      where: {
+        conversationId,
+        senderType: 'USER',
       },
     });
   }

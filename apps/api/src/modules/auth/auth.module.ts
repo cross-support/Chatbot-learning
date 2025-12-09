@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Scope } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -20,7 +20,14 @@ import { JwtStrategy } from './jwt.strategy';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [
+    {
+      provide: AuthService,
+      scope: Scope.REQUEST,
+      useClass: AuthService,
+    },
+    JwtStrategy,
+  ],
   controllers: [AuthController],
   exports: [AuthService, JwtModule],
 })

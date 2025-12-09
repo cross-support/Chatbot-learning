@@ -75,12 +75,18 @@ export default function ChatPage() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('join_admin_room', { adminId: admin?.id });
-      socket.emit(WS_EVENTS.JOIN_ROOM, { conversationId: id });
+      // 管理者ルームと会話ルームに参加
+      socket.emit('join_admin_room', { adminId: admin?.id, conversationId: id });
     });
 
     socket.on(WS_EVENTS.NEW_MESSAGE, (message: Message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        // 重複チェック
+        if (prev.some(m => m.id === message.id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
     });
 
     socket.on(WS_EVENTS.TYPING_INDICATOR, (_data: { isTyping: boolean; senderType: string }) => {
@@ -97,23 +103,44 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Command+Enter (Mac) または Ctrl+Enter (Windows) で送信
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent | React.KeyboardEvent) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
 
+    const messageContent = inputValue;
+    setInputValue(''); // 先にクリア
+
     try {
-      await fetch(`/api/conversations/${id}/messages`, {
+      const response = await fetch(`/api/conversations/${id}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ content: inputValue }),
+        body: JSON.stringify({ content: messageContent }),
       });
 
-      setInputValue('');
+      const newMessage = await response.json();
+      // APIからの応答で即座にメッセージを追加（WebSocketが来るまで待たない）
+      setMessages((prev) => {
+        // 重複チェック
+        if (prev.some(m => m.id === newMessage.id)) {
+          return prev;
+        }
+        return [...prev, newMessage];
+      });
     } catch (error) {
       console.error('Failed to send message:', error);
+      // エラー時は入力を復元
+      setInputValue(messageContent);
     }
   };
 
@@ -256,18 +283,19 @@ export default function ChatPage() {
           {/* Input */}
           <form onSubmit={handleSendMessage} className="p-4 border-t">
             <div className="flex gap-2">
-              <input
-                type="text"
+              <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="メッセージを入力..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                onKeyDown={handleKeyDown}
+                placeholder="メッセージを入力... (⌘+Enter で送信)"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none resize-none"
                 disabled={conversation.status !== 'HUMAN'}
+                rows={2}
               />
               <button
                 type="submit"
                 disabled={conversation.status !== 'HUMAN' || !inputValue.trim()}
-                className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed self-end"
               >
                 送信
               </button>

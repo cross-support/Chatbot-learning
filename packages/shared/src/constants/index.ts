@@ -8,6 +8,7 @@ export const WS_EVENTS = {
   PAGE_VIEW: 'page_view',
   TYPING: 'typing',
   MARK_READ: 'mark_read',
+  USER_CLOSE_CHAT: 'user_close_chat',
 
   // サーバー → クライアント
   NEW_MESSAGE: 'new_message',
@@ -17,6 +18,9 @@ export const WS_EVENTS = {
   NEW_REQUEST: 'new_request',
   USER_ACTIVITY: 'user_activity',
   CONNECTION_ACK: 'connection_ack',
+  CONVERSATION_UPDATED: 'conversation_updated',
+  MESSAGES_READ: 'messages_read',
+  ALL_MESSAGES_READ: 'all_messages_read',
   ERROR: 'error',
 } as const;
 
@@ -88,6 +92,7 @@ export const SENDER_TYPE = {
 export const CONTENT_TYPE = {
   TEXT: 'TEXT',
   IMAGE: 'IMAGE',
+  FILE: 'FILE',
   OPTION_SELECT: 'OPTION_SELECT',
   OPTION_PROMPT: 'OPTION_PROMPT',
   LINK: 'LINK',
@@ -118,6 +123,12 @@ export const CONFIG = {
     ALLOWED_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/heic'],
     ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.heic'],
   },
+  // ファイルアップロード（PDF等のドキュメント）
+  FILE: {
+    MAX_SIZE: 10 * 1024 * 1024, // 10MB
+    ALLOWED_TYPES: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ALLOWED_EXTENSIONS: ['.pdf', '.doc', '.docx', '.xls', '.xlsx'],
+  },
   // セッション
   SESSION: {
     COOKIE_NAME: 'crossbot_session',
@@ -140,11 +151,13 @@ export const CONFIG = {
 // ==================== メッセージ ====================
 export const MESSAGES = {
   SYSTEM: {
-    HANDOVER_REQUEST: '担当者にお繋ぎします。少々お待ちください。',
-    HANDOVER_REQUEST_JP_ONLY: '担当者にお繋ぎします。少々お待ちください。\n（日本語のみ対応可能です）',
+    HANDOVER_REQUEST: '担当者にお繋ぎします。ご質問内容を送信後、少々お待ちください。',
+    HANDOVER_REQUEST_JP_ONLY: '担当者にお繋ぎします。ご質問内容を送信後、少々お待ちください。\n（日本語のみ対応可能です）',
     OPERATOR_OFFLINE: '現在オペレーターは対応時間外です。後ほどご連絡いたします。',
     WELCOME: 'ご質問の種類をお選びください。',
+    WELCOME_AI: 'こんにちは！Cross Learningサポートです。\nご質問がございましたら、お気軽にメッセージをお送りください。',
     CLOSED: 'お問い合わせありがとうございました。',
+    AI_UNAVAILABLE: 'ただいまAIアシスタントが利用できません。オペレーターにお繋ぎしますので、少々お待ちください。',
   },
   ERROR: {
     CONNECTION_FAILED: '接続に失敗しました。再試行してください。',

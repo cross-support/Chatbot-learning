@@ -10,6 +10,7 @@ interface UserContext {
     id: string;
     name: string;
     email?: string;
+    role?: 'learner' | 'group_admin' | 'global_admin'; // LMSユーザーのロール
   };
 }
 
